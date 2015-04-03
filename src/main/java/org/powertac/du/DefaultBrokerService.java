@@ -127,7 +127,7 @@ public class DefaultBrokerService
   public void setDefaults ()
   {
     // create the default broker instance, register it with the repo
-    brokerRepo.add(createBroker("default broker"));
+    brokerRepo.add(createBroker("Simons broker"));
   }
 
   /**
