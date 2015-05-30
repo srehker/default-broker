@@ -53,6 +53,7 @@ import org.powertac.common.interfaces.TariffMarket;
 import org.powertac.common.msg.CustomerBootstrapData;
 import org.powertac.common.msg.TimeslotComplete;
 import org.powertac.common.repo.BrokerRepo;
+import org.powertac.common.repo.CustomerRepo;
 import org.powertac.common.repo.RandomSeedRepo;
 import org.powertac.common.repo.TimeslotRepo;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -87,6 +88,9 @@ public class DefaultBrokerServiceTests
   
   @Autowired
   private BrokerRepo brokerRepo;
+  
+  @Autowired
+  private CustomerRepo customerRepo;
 
   @Autowired
   private BrokerProxy mockProxy;
@@ -127,6 +131,7 @@ public class DefaultBrokerServiceTests
     ReflectionTestUtils.setField(service, "brokerProxyService", mockProxy);
     ReflectionTestUtils.setField(service, "timeslotRepo", timeslotRepo);
     ReflectionTestUtils.setField(service, "brokerRepo", brokerRepo);
+    ReflectionTestUtils.setField(service, "customerRepo", customerRepo);
     ReflectionTestUtils.setField(service, "serverPropertiesService",
                                  serverPropertiesService);
     ReflectionTestUtils.setField(service, "randomSeedRepo", mockRandom);
