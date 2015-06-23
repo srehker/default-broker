@@ -15,22 +15,46 @@
  */
 package org.powertac.du;
 
+import static org.powertac.util.MessageDispatcher.dispatch;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+
 import org.apache.log4j.Logger;
 import org.joda.time.DateTime;
 import org.joda.time.Instant;
 import org.joda.time.Interval;
-import org.powertac.common.*;
+import org.powertac.common.Broker;
+import org.powertac.common.CashPosition;
+import org.powertac.common.Competition;
+import org.powertac.common.Contract;
 import org.powertac.common.Contract.State;
+import org.powertac.common.CustomerInfo;
+import org.powertac.common.MarketPosition;
+import org.powertac.common.MarketTransaction;
+import org.powertac.common.Order;
+import org.powertac.common.RandomSeed;
+import org.powertac.common.Rate;
+import org.powertac.common.TariffSpecification;
+import org.powertac.common.TariffTransaction;
+import org.powertac.common.Timeslot;
+import org.powertac.common.WeatherReport;
 import org.powertac.common.config.ConfigurableValue;
+import org.powertac.common.enumerations.ContractIssue;
 import org.powertac.common.enumerations.PowerType;
 import org.powertac.common.exceptions.PowerTacException;
-import org.powertac.common.interfaces.*;
+import org.powertac.common.interfaces.BootstrapDataCollector;
+import org.powertac.common.interfaces.BrokerProxy;
+import org.powertac.common.interfaces.CompetitionControl;
+import org.powertac.common.interfaces.InitializationService;
+import org.powertac.common.interfaces.ServerConfiguration;
+import org.powertac.common.interfaces.TariffMarket;
 import org.powertac.common.msg.ContractAccept;
 import org.powertac.common.msg.ContractAnnounce;
 import org.powertac.common.msg.ContractConfirm;
 import org.powertac.common.msg.ContractDecommit;
 import org.powertac.common.msg.ContractEnd;
-import org.powertac.common.msg.ContractNegotiationMessage;
 import org.powertac.common.msg.ContractOffer;
 import org.powertac.common.msg.CustomerBootstrapData;
 import org.powertac.common.msg.MarketBootstrapData;
@@ -46,14 +70,6 @@ import org.powertac.common.timeseries.LoadForecast;
 import org.powertac.common.timeseries.LoadTimeSeries;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-
-import javax.security.auth.callback.ConfirmationCallback;
-
-import static org.powertac.util.MessageDispatcher.dispatch;
 
 /**
  * Default broker implementation. We do the implementation in a service, because
@@ -157,6 +173,9 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 	protected double reservationEnergyPrice = 0.004;
 	protected double reservationPeakLoadPrice = 70;
 	protected double reservationEarlyExitPrice = 5000;
+	protected double initialEnergyPrice = 0.002;
+	protected double initialPeakLoadPrice = 65;
+	protected double initialEarlyExitPrice = 2000;
 	protected long durationPreference = 1000 * 60 * 60 * 24 * 30L;
 	protected long maxDurationDeviation = 1000 * 60 * 60 * 24 * 7;
 
@@ -576,9 +595,8 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 		// all customers with canNegotiate true get offer!
 		CustomerInfo ci = customerRepo.findById(custId);
 		if (ci != null && ci.isCanNegotiate()) {
-			long duration = 1000 * 60 * 60 * 24 * 30L;// 30 days
-			ContractOffer offer = new ContractOffer(face, custId, 0.001, 60.,
-					duration, 2000., ci.getPowerType());
+			ContractOffer offer = new ContractOffer(face, custId, initialEnergyPrice, initialPeakLoadPrice,
+					durationPreference, initialEarlyExitPrice, ci.getPowerType());
 			Contract c = new Contract(offer);
 			contractRepo.addContract(c);
 			pendingContracts.add(c);
@@ -653,14 +671,14 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 			double coEnergyPrice = 0.;
 			long coDuration = 0;
 			double coEarlyWithdrawPrice = 0;
-			// buyer role
-			if (message.getPowerType() == PowerType.CONSUMPTION) {
+			// buyer role, a broker buys from producers and sells to consumers
+			if (message.getPowerType() == PowerType.PRODUCTION) {
 
 				// Energy Price
 				ContractOffer co = new ContractOffer(message);
-				if (!message.isAcceptedEnergyPrice()) {
+				if (!message.isAcceptedEnergyPrice() && message.isDiscussedIssue(ContractIssue.ENERGY_PRICE)) {
 					coEnergyPrice = generateOfferPriceBuyer(
-							message.getEnergyPrice(), reservationEnergyPrice,
+							initialEnergyPrice, reservationEnergyPrice,
 							getRound(message));
 					co.setEnergyPrice(coEnergyPrice);
 					utility = computeEnergyPriceUtilityBuyer(message,
@@ -680,10 +698,10 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 				}
 
 				// Peak Load Price
-				if (!message.isAcceptedPeakLoadPrice()) {
+				if (!message.isAcceptedPeakLoadPrice()&& message.isDiscussedIssue(ContractIssue.PEAK_LOAD_PRICE)) {
 					co = new ContractOffer(message);
 					coPeakLoadPrice = generateOfferPriceBuyer(
-							message.getPeakLoadPrice(),
+							initialPeakLoadPrice,
 							reservationPeakLoadPrice, getRound(message));
 					co.setPeakLoadPrice(coPeakLoadPrice);
 					utility = computePeakLoadPriceUtilityBuyer(message,
@@ -703,7 +721,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 				}
 
 				// Duration
-				if (!message.isAcceptedDuration()) {
+				if (!message.isAcceptedDuration()&& message.isDiscussedIssue(ContractIssue.DURATION)) {
 					co = new ContractOffer(message);
 					coDuration = durationPreference; // TODO generation
 					co.setDuration(coDuration);
@@ -722,10 +740,10 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 				}
 
 				// Early Withdraw
-				if (!message.isAcceptedEarlyWithdrawPayment()) {
+				if (!message.isAcceptedEarlyWithdrawPayment()&& message.isDiscussedIssue(ContractIssue.EARLY_WITHDRAW_PRICE)) {
 					co = new ContractOffer(message);
 					coEarlyWithdrawPrice = generateOfferPriceBuyer(
-							message.getEarlyWithdrawPayment(),
+							initialEarlyExitPrice,
 							reservationEarlyExitPrice, getRound(message));
 					co.setEarlyWithdrawPayment(coEarlyWithdrawPrice);
 					utility = computeEarlyWithdrawUtility(message);
@@ -744,21 +762,25 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 				}
 
 				// NOTHING WAS ACCEPTED THIS ROUND -> COUNTER OFFER
-				if (!message.isAcceptedEnergyPrice()) {
+				if (!message.isAcceptedEnergyPrice()&& message.isDiscussedIssue(ContractIssue.ENERGY_PRICE)) {
 					co = new ContractOffer(message);
 					co.setEnergyPrice(coEnergyPrice);
+					co.setDiscussedIssue(ContractIssue.ENERGY_PRICE);
 					brokerProxyService.routeMessage(co);
-				} else if (!message.isAcceptedPeakLoadPrice()) {
+				} else if (!message.isAcceptedPeakLoadPrice()&& message.isDiscussedIssue(ContractIssue.PEAK_LOAD_PRICE)) {
 					co = new ContractOffer(message);
 					co.setPeakLoadPrice(coPeakLoadPrice);
+					co.setDiscussedIssue(ContractIssue.PEAK_LOAD_PRICE);
 					brokerProxyService.routeMessage(co);
-				} else if (!message.isAcceptedDuration()) {
+				} else if (!message.isAcceptedDuration()&& message.isDiscussedIssue(ContractIssue.DURATION)) {
 					co = new ContractOffer(message);
 					co.setDuration(coDuration);
+					co.setDiscussedIssue(ContractIssue.DURATION);
 					brokerProxyService.routeMessage(co);
-				} else if (!message.isAcceptedEarlyWithdrawPayment()) {
+				} else if (!message.isAcceptedEarlyWithdrawPayment()&& message.isDiscussedIssue(ContractIssue.EARLY_WITHDRAW_PRICE)) {
 					co = new ContractOffer(message);
 					co.setEarlyWithdrawPayment(coEarlyWithdrawPrice);
+					co.setDiscussedIssue(ContractIssue.EARLY_WITHDRAW_PRICE);
 					brokerProxyService.routeMessage(co);
 				} else {
 					throw new PowerTacException(
@@ -766,13 +788,13 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 				}
 
 			}
-			// seller role
-			else if (message.getPowerType() == PowerType.PRODUCTION) {
+			// seller role a broker buys from producers and sells to consumers
+			else if (message.getPowerType() == PowerType.CONSUMPTION) {
 				// Energy Price
 				ContractOffer co = new ContractOffer(message);
-				if (!message.isAcceptedEnergyPrice()) {
+				if (!message.isAcceptedEnergyPrice()&& message.isDiscussedIssue(ContractIssue.ENERGY_PRICE)) {
 					coEnergyPrice = generateOfferPriceSeller(
-							message.getEnergyPrice(), reservationEnergyPrice,
+							initialEnergyPrice, reservationEnergyPrice,
 							getRound(message));
 					co.setEnergyPrice(coEnergyPrice);
 					utility = computeEnergyPriceUtilitySeller(message,
@@ -792,10 +814,10 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 				}
 
 				// Peak Load Price
-				if (!message.isAcceptedPeakLoadPrice()) {
+				if (!message.isAcceptedPeakLoadPrice()&& message.isDiscussedIssue(ContractIssue.PEAK_LOAD_PRICE)) {
 					co = new ContractOffer(message);
 					coPeakLoadPrice = generateOfferPriceSeller(
-							message.getPeakLoadPrice(),
+							initialPeakLoadPrice,
 							reservationPeakLoadPrice, getRound(message));
 					co.setPeakLoadPrice(coPeakLoadPrice);
 					utility = computePeakLoadPriceUtilitySeller(message,
@@ -815,7 +837,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 				}
 
 				// Duration
-				if (!message.isAcceptedDuration()) {
+				if (!message.isAcceptedDuration()&& message.isDiscussedIssue(ContractIssue.DURATION)) {
 					co = new ContractOffer(message);
 					coDuration = durationPreference; // TODO generation
 					co.setDuration(coDuration);
@@ -834,10 +856,10 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 				}
 
 				// Early Withdraw
-				if (!message.isAcceptedEarlyWithdrawPayment()) {
+				if (!message.isAcceptedEarlyWithdrawPayment()&& message.isDiscussedIssue(ContractIssue.EARLY_WITHDRAW_PRICE)) {
 					co = new ContractOffer(message);
 					coEarlyWithdrawPrice = generateOfferPriceSeller(
-							message.getEarlyWithdrawPayment(),
+							initialEarlyExitPrice,
 							reservationEarlyExitPrice, getRound(message));
 					co.setEarlyWithdrawPayment(coEarlyWithdrawPrice);
 					utility = computeEarlyWithdrawUtility(message);
@@ -856,21 +878,25 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 				}
 
 				// NOTHING WAS ACCEPTED THIS ROUND -> COUNTER OFFER
-				if (!message.isAcceptedEnergyPrice()) {
+				if (!message.isAcceptedEnergyPrice()&& message.isDiscussedIssue(ContractIssue.ENERGY_PRICE)) {
 					co = new ContractOffer(message);
 					co.setEnergyPrice(coEnergyPrice);
+					co.setDiscussedIssue(ContractIssue.ENERGY_PRICE);
 					brokerProxyService.routeMessage(co);
-				} else if (!message.isAcceptedPeakLoadPrice()) {
+				} else if (!message.isAcceptedPeakLoadPrice()&& message.isDiscussedIssue(ContractIssue.PEAK_LOAD_PRICE)) {
 					co = new ContractOffer(message);
 					co.setPeakLoadPrice(coPeakLoadPrice);
+					co.setDiscussedIssue(ContractIssue.PEAK_LOAD_PRICE);
 					brokerProxyService.routeMessage(co);
-				} else if (!message.isAcceptedDuration()) {
+				} else if (!message.isAcceptedDuration()&& message.isDiscussedIssue(ContractIssue.DURATION)) {
 					co = new ContractOffer(message);
 					co.setDuration(coDuration);
+					co.setDiscussedIssue(ContractIssue.DURATION);
 					brokerProxyService.routeMessage(co);
-				} else if (!message.isAcceptedEarlyWithdrawPayment()) {
+				} else if (!message.isAcceptedEarlyWithdrawPayment()&& message.isDiscussedIssue(ContractIssue.EARLY_WITHDRAW_PRICE)) {
 					co = new ContractOffer(message);
 					co.setEarlyWithdrawPayment(coEarlyWithdrawPrice);
+					co.setDiscussedIssue(ContractIssue.EARLY_WITHDRAW_PRICE);
 					brokerProxyService.routeMessage(co);
 				} else {
 					throw new PowerTacException(
@@ -1037,7 +1063,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 			ContractConfirm cf = new ContractConfirm(face, message);
 			brokerProxyService.routeMessage(cf);
 		} else {
-			processOffer(new ContractOffer(message), false);
+			brokerProxyService.routeMessage(new ContractOffer(message));
 		}
 	}
 
