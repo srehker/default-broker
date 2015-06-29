@@ -163,7 +163,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 
 	/** max number of rounds for negotiation */
 	protected static final int DEADLINE = 10;
-	protected static final double discountingFactor = 0.1;
+	protected static final double timeDiscountingFactor = 0.1;
 	/**
 	 * 1 = linear, <1 boulware and conceder for >1
 	 */
@@ -723,7 +723,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 				// Duration
 				if (!message.isAcceptedDuration()&& message.isDiscussedIssue(ContractIssue.DURATION)) {
 					co = new ContractOffer(message);
-					coDuration = durationPreference; // TODO generation
+					coDuration =  generateDuration(message.getDuration(), durationPreference, maxDurationDeviation, getRound(message));
 					co.setDuration(coDuration);
 					utility = computeUtility(message, message.getDuration());
 					counterOfferUtility = computeUtility(co, co.getDuration());
@@ -839,7 +839,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 				// Duration
 				if (!message.isAcceptedDuration()&& message.isDiscussedIssue(ContractIssue.DURATION)) {
 					co = new ContractOffer(message);
-					coDuration = durationPreference; // TODO generation
+					coDuration =  generateDuration(message.getDuration(), durationPreference, maxDurationDeviation, getRound(message));
 					co.setDuration(coDuration);
 					utility = computeUtility(message, message.getDuration());
 					counterOfferUtility = computeUtility(co, co.getDuration());
@@ -937,7 +937,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 		// energy
 		// cost
 		// TIME DISCOUNTING
-		utility = utility * Math.pow(discountingFactor, getRound(offer));
+		utility = utility * Math.pow(timeDiscountingFactor, getRound(offer));
 
 		return utility;
 	}
@@ -957,7 +957,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 		// energy
 		// cost
 		// TIME DISCOUNTING
-		utility = utility * Math.pow(discountingFactor, getRound(offer));
+		utility = utility * Math.pow(timeDiscountingFactor, getRound(offer));
 
 		return utility;
 	}
@@ -980,7 +980,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 																				// fee
 		}
 		// TIME DISCOUNTING
-		utility = utility * Math.pow(discountingFactor, getRound(offer));
+		utility = utility * Math.pow(timeDiscountingFactor, getRound(offer));
 
 		return utility;
 	}
@@ -1008,7 +1008,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 																				// price
 		}
 		// TIME DISCOUNTING
-		utility = utility * Math.pow(discountingFactor, getRound(offer));
+		utility = utility * Math.pow(timeDiscountingFactor, getRound(offer));
 
 		return utility;
 	}
@@ -1022,8 +1022,27 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 		}
 
 		// TIME DISCOUNTING
-		utility = utility * Math.pow(discountingFactor, getRound(offer));
+		utility = utility * Math.pow(timeDiscountingFactor, getRound(offer));
 		return utility;
+	}
+	
+	public long generateDuration(long offeredDuration, long preferredDuration,
+			long maxDurationDeviation, int round) {
+		// contract offer is too long period
+		if (offeredDuration > preferredDuration) {
+			return offeredDuration
+					- (Math.round(negotiationDecisionFunction(0, round, DEADLINE)
+							* maxDurationDeviation)/24*60*60*1000L) * 24*60*60*1000L; // round on full hours
+
+		}
+		// offer is too short period
+		else if (preferredDuration > offeredDuration) {
+			return offeredDuration
+					+ (Math.round(negotiationDecisionFunction(0, round, DEADLINE)
+							* maxDurationDeviation)/24*60*60*1000L) * 24*60*60*1000L; // round on full hours
+		} else {
+			return offeredDuration;
+		}
 	}
 
 	private boolean activeContract(DateTime startDate) {
