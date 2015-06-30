@@ -167,7 +167,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 	/**
 	 * 1 = linear, <1 boulware and conceder for >1
 	 */
-	protected static final double counterOfferFactor = 1;
+	protected static final double counterOfferFactor = 0.5;
 	protected HashMap<Long, Integer> negotiationRounds = new HashMap<Long, Integer>();
 
 	protected double reservationEnergyPrice = 0.004;
@@ -644,6 +644,10 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 		}
 
 	}
+	
+	private void resetNegotiationRound(long id) {		
+			negotiationRounds.put(id, 0);
+	}
 
 	public void handleMessage(ContractAnnounce message) {
 		initContractNegotiation(message.getCustomerId());
@@ -692,6 +696,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 					if (canAccept && utility >= counterOfferUtility) {
 						ContractAccept ca = new ContractAccept(message);
 						ca.setAcceptedEnergyPrice(true);
+						resetNegotiationRound(message.getCustomerId());
 						brokerProxyService.routeMessage(ca);
 						return;
 					}
@@ -715,6 +720,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 					if (canAccept && utility >= counterOfferUtility) {
 						ContractAccept ca = new ContractAccept(message);
 						ca.setAcceptedPeakLoadPrice(true);
+						resetNegotiationRound(message.getCustomerId());
 						brokerProxyService.routeMessage(ca);
 						return;
 					}
@@ -734,6 +740,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 					if (canAccept && utility >= counterOfferUtility) {
 						ContractAccept ca = new ContractAccept(message);
 						ca.setAcceptedDuration(true);
+						resetNegotiationRound(message.getCustomerId());
 						brokerProxyService.routeMessage(ca);
 						return;
 					}
@@ -756,6 +763,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 					if (canAccept && utility >= counterOfferUtility) {
 						ContractAccept ca = new ContractAccept(message);
 						ca.setAcceptedEarlyWithdrawPayment(true);
+						resetNegotiationRound(message.getCustomerId());
 						brokerProxyService.routeMessage(ca);
 						return;
 					}
@@ -808,6 +816,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 					if (canAccept && utility >= counterOfferUtility) {
 						ContractAccept ca = new ContractAccept(message);
 						ca.setAcceptedEnergyPrice(true);
+						resetNegotiationRound(message.getCustomerId());
 						brokerProxyService.routeMessage(ca);
 						return;
 					}
@@ -831,6 +840,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 					if (canAccept && utility >= counterOfferUtility) {
 						ContractAccept ca = new ContractAccept(message);
 						ca.setAcceptedPeakLoadPrice(true);
+						resetNegotiationRound(message.getCustomerId());
 						brokerProxyService.routeMessage(ca);
 						return;
 					}
@@ -850,6 +860,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 					if (canAccept && utility >= counterOfferUtility) {
 						ContractAccept ca = new ContractAccept(message);
 						ca.setAcceptedDuration(true);
+						resetNegotiationRound(message.getCustomerId());
 						brokerProxyService.routeMessage(ca);
 						return;
 					}
@@ -872,6 +883,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 					if (canAccept && utility >= counterOfferUtility) {
 						ContractAccept ca = new ContractAccept(message);
 						ca.setAcceptedEarlyWithdrawPayment(true);
+						resetNegotiationRound(message.getCustomerId());
 						brokerProxyService.routeMessage(ca);
 						return;
 					}
@@ -1073,6 +1085,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 
 	public void handleMessage(ContractAccept message) {
 		log.info("Contract ACCEPT arrived at Broker. Sending Confirm.");
+		resetNegotiationRound(message.getCustomerId());
 		if (message.isEveryIssueAccepted()) {
 			Contract c = contractRepo.findContractById(message.getContractId());
 			c.setState(State.ACCEPTED);
@@ -1082,7 +1095,21 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 			ContractConfirm cf = new ContractConfirm(face, message);
 			brokerProxyService.routeMessage(cf);
 		} else {
-			brokerProxyService.routeMessage(new ContractOffer(message));
+			ContractOffer newOffer = new ContractOffer(message);
+			// when you start a negotation on a new issue, do it with your own initial prices
+			if(!newOffer.isAcceptedDuration()){
+				newOffer.setDuration(durationPreference);
+			}
+			if(!newOffer.isAcceptedEarlyWithdrawPayment()){
+				newOffer.setEarlyWithdrawPayment(initialEarlyExitPrice);
+			}
+			if(!newOffer.isAcceptedEnergyPrice()){
+				newOffer.setEnergyPrice(initialEnergyPrice);
+			}
+			if(!newOffer.isAcceptedPeakLoadPrice()){
+				newOffer.setPeakLoadPrice(initialPeakLoadPrice);
+			}
+			brokerProxyService.routeMessage(newOffer);
 		}
 	}
 
