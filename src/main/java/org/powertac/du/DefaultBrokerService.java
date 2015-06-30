@@ -163,11 +163,11 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 
 	/** max number of rounds for negotiation */
 	protected static final int DEADLINE = 10;
-	protected static final double timeDiscountingFactor = 0.1;
+	protected static final double timeDiscountingFactor = 1;
 	/**
 	 * 1 = linear, <1 boulware and conceder for >1
 	 */
-	protected static final double counterOfferFactor = 0.5;
+	protected static final double counterOfferFactor = 1;
 	protected HashMap<Long, Integer> negotiationRounds = new HashMap<Long, Integer>();
 
 	protected double reservationEnergyPrice = 0.004;
@@ -176,8 +176,8 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 	protected double initialEnergyPrice = 0.002;
 	protected double initialPeakLoadPrice = 65;
 	protected double initialEarlyExitPrice = 2000;
-	protected long durationPreference = 1000 * 60 * 60 * 24 * 30L;
-	protected long maxDurationDeviation = 1000 * 60 * 60 * 24 * 7;
+	protected long durationPreference = 1000 * 60 * 60 * 24 * 180L;
+	protected long maxDurationDeviation = 1000 * 60 * 60 * 24 * 60l;
 
 	protected HashMap<Long, Contract> activeContracts;
 
@@ -737,7 +737,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 							+ co + " Round =" + getRound(message) + " Utility="
 							+ utility + "CO-Utility=" + counterOfferUtility);
 					// cant find a better option --> ACCEPT
-					if (canAccept && utility >= counterOfferUtility) {
+					if (canAccept &&  message.getDuration()<= durationPreference + maxDurationDeviation && message.getDuration()>= durationPreference-maxDurationDeviation && utility > 0 && utility >= counterOfferUtility) {
 						ContractAccept ca = new ContractAccept(message);
 						ca.setAcceptedDuration(true);
 						resetNegotiationRound(message.getCustomerId());
@@ -857,7 +857,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 							+ co + " Round =" + getRound(message) + " Utility="
 							+ utility + "CO-Utility=" + counterOfferUtility);
 					// cant find a better option --> ACCEPT
-					if (canAccept && utility >= counterOfferUtility) {
+					if (canAccept && message.getDuration()<= durationPreference + maxDurationDeviation && message.getDuration()>= durationPreference-maxDurationDeviation &&  utility >= counterOfferUtility) {
 						ContractAccept ca = new ContractAccept(message);
 						ca.setAcceptedDuration(true);
 						resetNegotiationRound(message.getCustomerId());
@@ -921,14 +921,15 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 	}
 
 	public double computeUtility(ContractOffer offer, long duration) {
+		long durationdays = duration/( 24*60*60*1000L);
 		if (offer.getPowerType() == PowerType.CONSUMPTION) {
-			return computeEnergyPriceUtilityBuyer(offer, duration)
-					+ computePeakLoadPriceUtilityBuyer(offer, duration)
-					+ computeEarlyWithdrawUtility(offer);
-		} else if (offer.getPowerType() == PowerType.PRODUCTION) {
-			return computeEnergyPriceUtilitySeller(offer, duration)
+			return (computeEnergyPriceUtilitySeller(offer, duration)
 					+ computePeakLoadPriceUtilitySeller(offer, duration)
-					+ computeEarlyWithdrawUtility(offer);
+					+ computeEarlyWithdrawUtility(offer))/durationdays;
+		} else if (offer.getPowerType() == PowerType.PRODUCTION) {
+			return (computeEnergyPriceUtilityBuyer(offer, duration)
+					+ computePeakLoadPriceUtilityBuyer(offer, duration)
+					+ computeEarlyWithdrawUtility(offer))/durationdays;
 		}
 
 		return -1;
@@ -1042,16 +1043,16 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 			long maxDurationDeviation, int round) {
 		// contract offer is too long period
 		if (offeredDuration > preferredDuration) {
-			return offeredDuration
-					- (Math.round(negotiationDecisionFunction(0, round, DEADLINE)
-							* maxDurationDeviation)/24*60*60*1000L) * 24*60*60*1000L; // round on full hours
+			return preferredDuration
+					+ (Math.round(negotiationDecisionFunction(0, round, DEADLINE)
+							* maxDurationDeviation)/(24*60*60*1000L)) * 24*60*60*1000L; // round on full hours
 
 		}
 		// offer is too short period
 		else if (preferredDuration > offeredDuration) {
-			return offeredDuration
-					+ (Math.round(negotiationDecisionFunction(0, round, DEADLINE)
-							* maxDurationDeviation)/24*60*60*1000L) * 24*60*60*1000L; // round on full hours
+			return preferredDuration
+					- (Math.round(negotiationDecisionFunction(0, round, DEADLINE)
+							* maxDurationDeviation)/(24*60*60*1000L)) * 24*60*60*1000L; // round on full hours
 		} else {
 			return offeredDuration;
 		}
