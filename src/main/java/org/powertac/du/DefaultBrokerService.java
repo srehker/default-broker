@@ -162,12 +162,12 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 	private double minMWh = 1E-06; // don't worry about 1 Wh or less
 
 	/** max number of rounds for negotiation */
-	protected static final int DEADLINE = 10;
-	protected static final double timeDiscountingFactor = 1;
+	protected int DEADLINE = 10;
+	protected double timeDiscountingFactor = 1;
 	/**
 	 * 1 = linear, <1 boulware and conceder for >1
 	 */
-	protected static final double counterOfferFactor = 1;
+	protected double counterOfferFactor = 0.5;
 	protected HashMap<Long, Integer> negotiationRounds = new HashMap<Long, Integer>();
 
 	protected double reservationEnergyPrice = 0.004;
@@ -176,8 +176,9 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 	protected double initialEnergyPrice = 0.002;
 	protected double initialPeakLoadPrice = 65;
 	protected double initialEarlyExitPrice = 2000;
-	protected long durationPreference = 1000 * 60 * 60 * 24 * 180L;
+	protected long durationPreference = 1000 * 60 * 60 * 24 * 365L;//1000 * 60 * 60 * 24 * 180L;
 	protected long maxDurationDeviation = 1000 * 60 * 60 * 24 * 60l;
+	protected double probabiltyContractIntersection = 0.5;
 
 	protected HashMap<Long, Contract> activeContracts;
 
@@ -591,13 +592,13 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 		this.activate();
 	}
 
-	public void initContractNegotiation(long custId) {
+	public void initContractNegotiation(long custId, long startDate) {
 		// all customers with canNegotiate true get offer!
 		CustomerInfo ci = customerRepo.findById(custId);
 		if (ci != null && ci.isCanNegotiate()) {
 			ContractOffer offer = new ContractOffer(face, custId, initialEnergyPrice, initialPeakLoadPrice,
 					durationPreference, initialEarlyExitPrice, ci.getPowerType());
-			Contract c = new Contract(offer);
+			Contract c = new Contract(offer, startDate);
 			contractRepo.addContract(c);
 			pendingContracts.add(c);
 			brokerProxyService.routeMessage(offer);
@@ -650,7 +651,7 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 	}
 
 	public void handleMessage(ContractAnnounce message) {
-		initContractNegotiation(message.getCustomerId());
+		initContractNegotiation(message.getCustomerId(), message.getStartDate());
 	}
 
 	// counter offer
@@ -1032,6 +1033,8 @@ public class DefaultBrokerService implements BootstrapDataCollector,
 
 		if (activeContract(starttime)) {
 			utility += offer.getEarlyWithdrawPayment();
+		}else{
+			utility += offer.getEarlyWithdrawPayment()*probabiltyContractIntersection;
 		}
 
 		// TIME DISCOUNTING
